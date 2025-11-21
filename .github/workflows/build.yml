@@ -147,7 +147,17 @@ jobs:
       - name: Build Kernel
         run: |
           cd kernel-source
-          make -j$(nproc) ARCH=arm64 O=out
+          make -j$(nproc) ARCH=arm64 O=out HOSTCC=gcc HOSTCXX=g++ HOSTLD=ld scripts
+          
+          make -j$(nproc) ARCH=arm64 O=out \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang-21 \
+            LD=ld.lld-21 \
+            NM=llvm-nm-21 \
+            OBJCOPY=llvm-objcopy-21 \
+            OBJDUMP=llvm-objdump-21 \
+            STRIP=llvm-strip-21 \
+            CLANG_TRIPLE=aarch64-linux-gnu-
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
