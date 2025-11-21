@@ -145,7 +145,7 @@ jobs:
           unset CXXFLAGS
           unset LDFLAGS
           
-          make -j$(nproc) ARCH=arm64 O=out \
+          make ARCH=arm64 O=out \
             CC=clang \
             LD=ld.lld
 
