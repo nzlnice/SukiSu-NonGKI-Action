@@ -1,0 +1,133 @@
+# This workflow is designed for non-GKI kernels only. It reads configurations from 'config.build' in the repo root.
+# 此工作流仅适用于 non-GKI 内核。它从仓库根目录的 'config.build' 文件读取配置。
+# You can customize kernel source, branch, toolchains, etc., via the config file.
+# 通过配置文件，您可以自定义内核源码、分支、工具链等。
+# Triggered on push to main branch or manually.
+# 在推送到 main 分支时或手动触发。
+# Note: If a signature is required, it should be applied manually.
+# 注意：如果需要签名，应手动签名内核。
+
+name: Build Non-GKI Kernel with Sukisu
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git bc bison flex libssl-dev build-essential libelf-dev libncurses5-dev zip ccache wget curl python3 lz4 dwarves
+
+      - name: Load Configuration
+        run: |
+          if [ -f config.build ]; then
+            source config.build
+          else
+            echo "Error: config.build not found!" && exit 1
+          fi
+          echo "KERNEL_REPO=${KERNEL_REPO}" >> $GITHUB_ENV
+          echo "KERNEL_BRANCH=${KERNEL_BRANCH}" >> $GITHUB_ENV
+          echo "ENABLE_SUSFS=${ENABLE_SUSFS}" >> $GITHUB_ENV
+          echo "CLANG_VERSION=${CLANG_VERSION}" >> $GITHUB_ENV
+          echo "CLANG_URL=${CLANG_URL}" >> $GITHUB_ENV
+          echo "LLD_VERSION=${LLD_VERSION}" >> $GITHUB_ENV
+          echo "LLD_URL=${LLD_URL}" >> $GITHUB_ENV
+          echo "DEFCONFIG_PATH=${DEFCONFIG_PATH}" >> $GITHUB_ENV
+
+      - name: Download Custom Toolchains if Specified
+        run: |
+          # clang
+          if [ ! -z "${{ env.CLANG_URL }}" ]; then
+            wget -q "${{ env.CLANG_URL }}" -O clang.tar.gz
+            mkdir -p ~/clang
+            tar -xzf clang.tar.gz -C ~/clang --strip-components=1
+            export PATH="$HOME/clang/bin:$PATH"
+            export CC=clang
+            export LD=ld.lld
+          elif [ ! -z "${{ env.CLANG_VERSION }}" ]; then
+            sudo apt-get install -y clang-${{ env.CLANG_VERSION }} || echo "Warning: Clang version not found in apt"
+            export CC=clang-${{ env.CLANG_VERSION }}
+          else
+            sudo apt-get install -y clang
+            export CC=clang
+          fi
+          
+          # lld
+          if [ ! -z "${{ env.LLD_URL }}" ]; then
+            wget -q "${{ env.LLD_URL }}" -O lld.tar.gz
+            mkdir -p ~/lld
+            tar -xzf lld.tar.gz -C ~/lld --strip-components=1
+            export PATH="$HOME/lld/bin:$PATH"
+            export LD=ld.lld
+          elif [ ! -z "${{ env.LLD_VERSION }}" ]; then
+            sudo apt-get install -y lld-${{ env.LLD_VERSION }} || echo "Warning: LLD version not found in apt"
+            export LD=ld.lld-${{ env.LLD_VERSION }}
+          else
+            sudo apt-get install -y lld
+            export LD=ld.lld
+          fi
+          
+          # cross-compile
+          # 交叉编译
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          
+          echo "=== Toolchain Versions ==="
+          $CC --version || echo "CC not set properly"
+          $LD --version || echo "LD not set properly"
+
+      - name: Clone Kernel Source
+        run: |
+          git clone --depth=1 -b "${{ env.KERNEL_BRANCH }}" "${{ env.KERNEL_REPO }}" kernel-source
+          cd kernel-source
+
+      - name: Integrate Sukisu and Apply Patches
+        run: |
+          cd kernel-source
+          if [ "${{ env.ENABLE_SUSFS }}" = "yes" ] || [ "${{ env.ENABLE_SUSFS }}" = "true" ]; then
+            BRANCH="susfs-main"
+          else
+            BRANCH="nongki"
+          fi
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s $BRANCH
+          git clone https://github.com/jonjeexe/KernelSU_Patches Patches
+          curl -O https://raw.githubusercontent.com/jonjeexe/KernelSU_Patches/refs/heads/non-GKI/Patch.sh
+          bash Patch.sh
+
+      - name: Add KernelSU Config to Defconfig
+        run: |
+          cd kernel-source
+          DEFCONFIG_FILE="arch/arm64/configs/${{ env.DEFCONFIG_PATH }}"
+          echo "" >> $DEFCONFIG_FILE
+          echo "# KernelSU" >> $DEFCONFIG_FILE
+          echo "CONFIG_KSU=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KPM=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG_FILE
+
+      - name: Prepare Build
+        run: |
+          cd kernel-source
+          mkdir out
+          make ARCH=arm64 O=out "${{ env.DEFCONFIG_PATH }}"
+
+      - name: Build Kernel
+        run: |
+          cd kernel-source
+          make -j$(nproc) ARCH=arm64 O=out
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build
+          path: kernel-source/out/arch/arm64/boot/
