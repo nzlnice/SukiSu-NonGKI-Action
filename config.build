@@ -40,3 +40,5 @@ export LLD_URL=""
 # Defconfig 路径,包括名称（例如 blossom_defconfig）
 export DEFCONFIG_PATH="blossom_defconfig"
 # Usually in arch/arm64/configs/ 通常在 arch/arm64/configs/ 下
+
+KERNEL_IMAGE_NAME=Image.gz
