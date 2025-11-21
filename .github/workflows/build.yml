@@ -80,6 +80,16 @@ jobs:
             export LD=ld.lld
           fi
           
+           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${{ env.CLANG_VERSION }} 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${{ env.CLANG_VERSION }} 100
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-${{ env.CLANG_VERSION }} 100
+          sudo update-alternatives --install /usr/bin/llvm-nm llvm-nm /usr/bin/llvm-nm-${{ env.CLANG_VERSION }} 100
+          sudo update-alternatives --install /usr/bin/llvm-objcopy llvm-objcopy /usr/bin/llvm-objcopy-${{ env.CLANG_VERSION }} 100
+          
+          sudo update-alternatives --set clang /usr/bin/clang-${{ env.CLANG_VERSION }}
+          sudo update-alternatives --set clang++ /usr/bin/clang++-${{ env.CLANG_VERSION }}
+          sudo update-alternatives --set ld.lld /usr/bin/ld.lld-${{ env.CLANG_VERSION }}
+          
           # cross-compile
           # 交叉编译
           export CLANG_TRIPLE=aarch64-linux-gnu-
