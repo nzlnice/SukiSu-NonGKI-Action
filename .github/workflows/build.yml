@@ -81,10 +81,19 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          
+
+          echo "HOSTCC=clang" >> $GITHUB_ENV
+          echo "HOSTCXX=clang++" >> $GITHUB_ENV
+          echo "HOSTLD=ld.lld" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "NM=llvm-nm" >> $GITHUB_ENV
+          echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+
           echo "=== Toolchain Versions ==="
-          $CC --version || echo "CC not set properly"
-          $LD --version || echo "LD not set properly"
+          clang --version
+          ld.lld --version
 
       - name: Clone Kernel Source
         run: |
