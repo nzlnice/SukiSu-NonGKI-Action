@@ -1,12 +1,3 @@
-# This workflow is designed for non-GKI kernels only. It reads configurations from 'config.build' in the repo root.
-# 此工作流仅适用于 non-GKI 内核。它从仓库根目录的 'config.build' 文件读取配置。
-# You can customize kernel source, branch, toolchains, etc., via the config file.
-# 通过配置文件，您可以自定义内核源码、分支、工具链等。
-# Triggered on push to main branch or manually.
-# 在推送到 main 分支时或手动触发。
-# Note: If a signature is required, it should be applied manually.
-# 注意：如果需要签名，应手动签名内核。
-
 name: Build Non-GKI Kernel with Sukisu
 
 on:
@@ -17,7 +8,11 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -25,7 +20,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git bc bison flex libssl-dev build-essential libelf-dev libncurses5-dev zip ccache wget curl python3 lz4 dwarves
+          sudo apt-get install -y git bc bison flex libssl-dev build-essential libelf-dev libncurses5-dev zip ccache wget curl python3 lz4 dwarves device-tree-compiler
 
       - name: Load Configuration
         run: |
@@ -42,66 +37,38 @@ jobs:
           echo "LLD_VERSION=${LLD_VERSION}" >> $GITHUB_ENV
           echo "LLD_URL=${LLD_URL}" >> $GITHUB_ENV
           echo "DEFCONFIG_PATH=${DEFCONFIG_PATH}" >> $GITHUB_ENV
+          echo "KERNEL_IMAGE_NAME=${KERNEL_IMAGE_NAME:-Image.gz-dtb}" >> $GITHUB_ENV
+          echo "BUILD_TIME=$(TZ=Asia/Shanghai date "+%Y%m%d%H%M")" >> $GITHUB_ENV
 
-      - name: Download Custom Toolchains if Specified
+      - name: Download Toolchains
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh ${{ env.CLANG_VERSION }}
           
-          # clang
-          if [ ! -z "${{ env.CLANG_URL }}" ]; then
-            wget -q "${{ env.CLANG_URL }}" -O clang.tar.gz
-            mkdir -p ~/clang
-            tar -xzf clang.tar.gz -C ~/clang --strip-components=1
-            export PATH="$HOME/clang/bin:$PATH"
-            export CC=clang
-            export LD=ld.lld
-          elif [ ! -z "${{ env.CLANG_VERSION }}" ]; then
-            sudo apt-get install -y clang-${{ env.CLANG_VERSION }} || echo "Warning: Clang version not found in apt"
-            export CC=clang-${{ env.CLANG_VERSION }}
-          else
-            sudo apt-get install -y clang
-            export CC=clang
-          fi
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-          # lld
-          if [ ! -z "${{ env.LLD_URL }}" ]; then
-            wget -q "${{ env.LLD_URL }}" -O lld.tar.gz
-            mkdir -p ~/lld
-            tar -xzf lld.tar.gz -C ~/lld --strip-components=1
-            export PATH="$HOME/lld/bin:$PATH"
-            export LD=ld.lld
-          elif [ ! -z "${{ env.LLD_VERSION }}" ]; then
-            sudo apt-get install -y lld-${{ env.LLD_VERSION }} || echo "Warning: LLD version not found in apt"
-            export LD=ld.lld-${{ env.LLD_VERSION }}
-          else
-            sudo apt-get install -y lld
-            export LD=ld.lld
-          fi
+          sudo apt-get install -y clang-${{ env.CLANG_VERSION }} lld-${{ env.CLANG_VERSION }} llvm-${{ env.CLANG_VERSION }}
           
           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${{ env.CLANG_VERSION }} 100
           sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${{ env.CLANG_VERSION }} 100
           sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-${{ env.CLANG_VERSION }} 100
           sudo update-alternatives --install /usr/bin/llvm-nm llvm-nm /usr/bin/llvm-nm-${{ env.CLANG_VERSION }} 100
           sudo update-alternatives --install /usr/bin/llvm-objcopy llvm-objcopy /usr/bin/llvm-objcopy-${{ env.CLANG_VERSION }} 100
+          sudo update-alternatives --install /usr/bin/llvm-strip llvm-strip /usr/bin/llvm-strip-${{ env.CLANG_VERSION }} 100
           
           sudo update-alternatives --set clang /usr/bin/clang-${{ env.CLANG_VERSION }}
           sudo update-alternatives --set clang++ /usr/bin/clang++-${{ env.CLANG_VERSION }}
           sudo update-alternatives --set ld.lld /usr/bin/ld.lld-${{ env.CLANG_VERSION }}
 
-          echo "HOSTCC=clang" >> $GITHUB_ENV
-          echo "HOSTCXX=clang++" >> $GITHUB_ENV
-          echo "HOSTLD=ld.lld" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "LD=ld.lld" >> $GITHUB_ENV
-          echo "NM=llvm-nm" >> $GITHUB_ENV
-          echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
 
           echo "=== Toolchain Versions ==="
           clang --version
           ld.lld --version
+          aarch64-linux-gnu-gcc --version
 
       - name: Clone Kernel Source
         run: |
@@ -128,15 +95,16 @@ jobs:
           echo "" >> $DEFCONFIG_FILE
           echo "# KernelSU" >> $DEFCONFIG_FILE
           echo "CONFIG_KSU=y" >> $DEFCONFIG_FILE
-          echo "CONFIG_KPM=y" >> $GITHUB_ENV
-          echo "CONFIG_KALLSYMS=y" >> $GITHUB_ENV
-          echo "CONFIG_KALLSYMS_ALL=y" >> $GITHUB_ENV
+          echo "CONFIG_KPROBES=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG_FILE
+          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG_FILE
 
       - name: Prepare Build
         run: |
           cd kernel-source
-          mkdir out
-          make ARCH=arm64 O=out "${{ env.DEFCONFIG_PATH }}"
+          mkdir -p out
+          make ARCH=arm64 O=out CROSS_COMPILE=aarch64-linux-gnu- ${{ env.DEFCONFIG_PATH }}
 
       - name: Build Kernel
         run: |
@@ -147,10 +115,62 @@ jobs:
           
           make ARCH=arm64 O=out \
             CC=clang \
-            LD=ld.lld
+            LD=ld.lld \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            -j$(nproc --all)
 
-      - name: Upload Artifact
+      - name: Check Kernel Output
+        run: |
+          cd kernel-source
+          if [ -f out/arch/arm64/boot/${{ env.KERNEL_IMAGE_NAME }} ]; then
+            echo "KERNEL_BUILD_SUCCESS=true" >> $GITHUB_ENV
+            echo "Kernel build successful!"
+          else
+            echo "Kernel output file not found!"
+            exit 1
+          fi
+
+      - name: Prepare AnyKernel3
+        if: env.KERNEL_BUILD_SUCCESS == 'true'
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3 --depth=1 AnyKernel3
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+          sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
+          sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
+          
+          cp kernel-source/out/arch/arm64/boot/${{ env.KERNEL_IMAGE_NAME }} AnyKernel3/
+          
+          if [ -f kernel-source/out/arch/arm64/boot/dtbo.img ]; then
+            cp kernel-source/out/arch/arm64/boot/dtbo.img AnyKernel3/
+            echo "DTBO_COPIED=true" >> $GITHUB_ENV
+          fi
+          
+          rm -rf AnyKernel3/.git* AnyKernel3/README.md
+
+      - name: Create Flashable Zip
+        if: env.KERNEL_BUILD_SUCCESS == 'true'
+        run: |
+          cd AnyKernel3
+          zip -r9 kernel-flashable-${{ env.BUILD_TIME }}.zip * -x .git*
+
+      - name: Upload Kernel Image
+        if: env.KERNEL_BUILD_SUCCESS == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-build
-          path: kernel-source/out/arch/arm64/boot/
+          name: kernel-image-${{ env.BUILD_TIME }}
+          path: kernel-source/out/arch/arm64/boot/${{ env.KERNEL_IMAGE_NAME }}
+
+      - name: Upload AnyKernel3 Zip
+        if: env.KERNEL_BUILD_SUCCESS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: anykernel3-flashable-${{ env.BUILD_TIME }}
+          path: AnyKernel3/kernel-flashable-${{ env.BUILD_TIME }}.zip
+
+      - name: Upload DTBO Image
+        if: env.DTBO_COPIED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dtbo-image-${{ env.BUILD_TIME }}
+          path: AnyKernel3/dtbo.img
